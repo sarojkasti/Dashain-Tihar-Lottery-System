@@ -6,7 +6,7 @@ import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 
 function setup(){const db=openStore();db.prepare('INSERT INTO campaigns(name,start,end,threshold) VALUES(?,?,?,?)').run('Test','2083/05/01','2083/08/30',200000);return db;}
-function ingest(db,reference,amount,kind='sale'){return importGroups(db,{campaign:1,kind,filename:'test.xlsx',groups:[{reference,amount,phone:'9800000000',name:'Test',outlet:'PKR',date:'2083/06/01',errors:[],excluded:false}]},[reference]);}
+function ingest(db,reference,amount,kind='sale',date='2083/06/01'){return importGroups(db,{campaign:1,kind,filename:'test.xlsx',groups:[{reference,amount,phone:'9800000000',name:'Test',outlet:'PKR',date,errors:[],excluded:false}]},[reference]);}
 test('carry balances, ignore repeated imports, retain tickets after returns and recover negative balances',()=>{
  const db=setup();ingest(db,'PKR-1',450000);assert.equal(ingest(db,'PKR-1',450000).count,0);
  assert.equal(assign(db,1,200000,2).count,2);assert.equal(db.prepare('SELECT balance FROM customers').get().balance,50000);
@@ -22,6 +22,12 @@ test('changed threshold affects remaining balance only and stale preview cannot 
  assert.throws(()=>assign(db,1,200000,0),/changed/);assign(db,1,100000,1);
  assert.equal(db.prepare('SELECT balance FROM customers').get().balance,50000);
  assert.equal(db.prepare('SELECT SUM(threshold*count) n FROM batches').get().n,300000);db.close();
+});
+test('ticket records purchase data across two invoice dates',()=>{
+ const db=setup();ingest(db,'PKR-1',150000,'sale','2083/06/01');ingest(db,'PKR-2',50000,'sale','2083/06/02');
+ assign(db,1,200000,1);
+ const rows=db.prepare(`SELECT i.reference,i.outlet,i.date,ts.amount FROM ticket_sources ts JOIN invoices i ON i.id=ts.invoice ORDER BY i.id`).all().map(r=>({...r}));
+ assert.deepEqual(rows,[{reference:'PKR-1',outlet:'PKR',date:'2083/06/01',amount:150000},{reference:'PKR-2',outlet:'PKR',date:'2083/06/02',amount:50000}]);db.close();
 });
 test('invalid selected invoice rolls back import',()=>{
  const db=setup();assert.throws(()=>importGroups(db,{campaign:1,kind:'sale',groups:[{reference:'BAD',errors:['Missing phone']}]},['BAD']),/Invalid/);

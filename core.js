@@ -24,6 +24,7 @@ export function openStore(path = ':memory:') {
     CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY,campaign INTEGER REFERENCES campaigns(id),upload TEXT REFERENCES uploads(id),kind TEXT,reference TEXT,customer INTEGER REFERENCES customers(id),outlet TEXT,date TEXT,amount INTEGER,UNIQUE(campaign,kind,reference));
     CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY,campaign INTEGER REFERENCES campaigns(id),threshold INTEGER,count INTEGER,created TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS tickets(number TEXT PRIMARY KEY,campaign INTEGER REFERENCES campaigns(id),customer INTEGER REFERENCES customers(id),batch TEXT REFERENCES batches(id));
+    CREATE TABLE IF NOT EXISTS ticket_sources(ticket TEXT REFERENCES tickets(number),invoice INTEGER REFERENCES invoices(id),amount INTEGER NOT NULL,PRIMARY KEY(ticket,invoice));
     CREATE TABLE IF NOT EXISTS exports(id TEXT PRIMARY KEY,campaign INTEGER REFERENCES campaigns(id),created TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,campaign INTEGER REFERENCES campaigns(id),customer INTEGER REFERENCES customers(id),batch TEXT REFERENCES batches(id),message TEXT,status TEXT DEFAULT 'pending',export_id TEXT REFERENCES exports(id));
     CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,campaign INTEGER,event TEXT,detail TEXT,created TEXT DEFAULT CURRENT_TIMESTAMP);`);
@@ -71,6 +72,36 @@ export function importGroups(db, preview, references) {
     return {id,count,total};
   });
 }
+function ticketSourceQueue(db, customer) {
+  const rows = db.prepare(`SELECT i.id,i.reference,i.date,i.amount-COALESCE(SUM(ts.amount),0) AS remaining
+    FROM invoices i LEFT JOIN ticket_sources ts ON ts.invoice=i.id
+    WHERE i.customer=?
+    GROUP BY i.id
+    HAVING remaining!=0
+    ORDER BY i.id`).all(customer);
+  const queue = []; let debt = 0;
+  for (const row of rows) {
+    if (row.remaining < 0) { debt += -row.remaining; continue; }
+    let usable = row.remaining;
+    if (debt) {
+      const offset = Math.min(debt, usable);
+      debt -= offset; usable -= offset;
+    }
+    if (usable > 0) queue.push({...row, remaining: usable});
+  }
+  return queue;
+}
+function recordTicketSources(db, ticket, customer, amount) {
+  const queue = ticketSourceQueue(db, customer);
+  let needed = amount;
+  for (const source of queue) {
+    if (!needed) break;
+    const used = Math.min(needed, source.remaining);
+    db.prepare('INSERT INTO ticket_sources(ticket,invoice,amount) VALUES(?,?,?)').run(ticket,source.id,used);
+    needed -= used;
+  }
+  if (needed) throw Error('Could not match ticket to purchase records. Review customer balance.');
+}
 export function assign(db, campaign, expectedThreshold, expectedCount) {
   return transaction(db, () => {
     const config = db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaign);
@@ -88,6 +119,7 @@ export function assign(db, campaign, expectedThreshold, expectedCount) {
         let number;
         do { number = `DT-${randomInt(0,10000000000).toString().padStart(10,'0')}`; } while(db.prepare('SELECT number FROM tickets WHERE number=?').get(number));
         db.prepare('INSERT INTO tickets(number,campaign,customer,batch) VALUES(?,?,?,?)').run(number,campaign,c.id,batch);
+        recordTicketSources(db,number,c.id,config.threshold);
         numbers.push(number);
       }
       db.prepare('UPDATE customers SET balance=balance-? WHERE id=?').run(quantity*config.threshold,c.id);

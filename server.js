@@ -102,12 +102,18 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
     if(req.method==='GET' && url.pathname==='/api/sms-settings')return json(res,{configured:Boolean(getSmsToken())});
     if(req.method==='GET' && url.pathname==='/api/sms-test-history')return json(res,{rows:smsTestHistory(db,url.searchParams.get('start_date'),url.searchParams.get('end_date'))});
     if(req.method==='GET' && url.pathname==='/api/users')return json(res,{users:db.prepare('SELECT * FROM users ORDER BY username').all().map(publicUser)});
+    const campaignId=Number(url.searchParams.get('campaign'));
     if(req.method==='GET' && url.pathname==='/api/tickets.csv') {
       const campaign=db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaignId);
       if(!campaign)fail('Campaign not found.',404);
-      const rows=db.prepare("SELECT t.number,c.name,c.phone,datetime(b.created,'+5 hours','+45 minutes') AS assigned FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number").all(campaignId);
+      const rows=db.prepare(`SELECT t.number,c.name,c.phone,datetime(b.created,'+5 hours','+45 minutes') AS assigned,
+        COALESCE((SELECT group_concat(date || ' ' || outlet || ' ' || reference || ' Rs. ' || printf('%.2f', amount/100.0), '; ') FROM (
+          SELECT i.date,i.outlet,i.reference,ts.amount FROM ticket_sources ts JOIN invoices i ON i.id=ts.invoice WHERE ts.ticket=t.number ORDER BY i.id
+        )),'') AS purchases
+        FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number`).all(campaignId);
       const csvName=`tickets-${campaign.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.csv`;
-      const csv='﻿'+'Ticket Number,Customer Name,Phone,Assigned (Nepal Time)\r\n'+rows.map(r=>[r.number,`"${String(r.name||'').replace(/"/g,'""')}"`,r.phone,r.assigned].join(',')).join('\r\n');
+      const quote=v=>`"${String(v??'').replace(/"/g,'""')}"`;
+      const csv='﻿'+'Ticket Number,Customer Name,Phone,Assigned (Nepal Time),Purchase Data\r\n'+rows.map(r=>[r.number,quote(r.name),r.phone,r.assigned,quote(r.purchases)].join(',')).join('\r\n');
       audit(db,campaignId,'tickets exported',JSON.stringify({count:rows.length}));
       res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${csvName}"`);return res.end(csv);
     }
@@ -117,7 +123,6 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
       audit(db,null,'audit report exported',JSON.stringify(Object.fromEntries(url.searchParams)));
       res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="audit-report.csv"');return res.end(report);
     }
-    const campaignId=Number(url.searchParams.get('campaign'));
     if(req.method==='GET' && url.pathname==='/api/state') {
       const campaigns=db.prepare('SELECT * FROM campaigns ORDER BY id DESC').all();
       const campaign=campaigns.find(c=>c.id===campaignId)||campaigns[0];
@@ -125,7 +130,11 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
       const id=campaign.id;
       return json(res,{campaigns,campaign,smsConfigured:Boolean(getSmsToken()),
         customers:db.prepare('SELECT * FROM customers WHERE campaign=? ORDER BY name').all(id),
-        tickets:db.prepare('SELECT t.*,c.phone,c.name,b.created FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number').all(id),
+        tickets:db.prepare(`SELECT t.*,c.phone,c.name,b.created,
+          COALESCE((SELECT group_concat(date || ' ' || outlet || ' ' || reference || ' Rs. ' || printf('%.2f', amount/100.0), '; ') FROM (
+            SELECT i.date,i.outlet,i.reference,ts.amount FROM ticket_sources ts JOIN invoices i ON i.id=ts.invoice WHERE ts.ticket=t.number ORDER BY i.id
+          )),'') AS purchases
+          FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number`).all(id),
         messages:db.prepare('SELECT m.*,c.phone,c.name,a.provider_id,a.detail AS api_detail FROM messages m JOIN customers c ON c.id=m.customer LEFT JOIN sms_attempts a ON a.message=m.id WHERE m.campaign=? ORDER BY m.rowid DESC').all(id),
         uploads:db.prepare('SELECT * FROM uploads WHERE campaign=? ORDER BY created DESC').all(id),
         batches:db.prepare('SELECT * FROM batches WHERE campaign=? ORDER BY created DESC').all(id),
