@@ -36,6 +36,7 @@ export function openStore(path = ':memory:') {
     CREATE INDEX IF NOT EXISTS audit_actor ON audit(actor);
     CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT,'Audit records cannot be edited'); END;
     CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT,'Audit records cannot be deleted'); END;`);
+  backfillTicketSources(db);
   return db;
 }
 export function transaction(db, action) {
@@ -90,6 +91,22 @@ function ticketSourceQueue(db, customer) {
     if (usable > 0) queue.push({...row, remaining: usable});
   }
   return queue;
+}
+function backfillTicketSources(db) {
+  if (!db.prepare(`SELECT t.number FROM tickets t LEFT JOIN ticket_sources ts ON ts.ticket=t.number WHERE ts.ticket IS NULL LIMIT 1`).get()) return;
+  transaction(db, () => {
+    const customers = db.prepare(`SELECT DISTINCT t.customer FROM tickets t
+      LEFT JOIN ticket_sources ts ON ts.ticket=t.number
+      WHERE ts.ticket IS NULL`).all();
+    for (const {customer} of customers) {
+      const tickets = db.prepare(`SELECT t.number,b.threshold FROM tickets t
+        JOIN batches b ON b.id=t.batch
+        LEFT JOIN ticket_sources ts ON ts.ticket=t.number
+        WHERE t.customer=? AND ts.ticket IS NULL
+        ORDER BY b.created,t.rowid`).all(customer);
+      for (const ticket of tickets) recordTicketSources(db,ticket.number,customer,ticket.threshold);
+    }
+  });
 }
 function recordTicketSources(db, ticket, customer, amount) {
   const queue = ticketSourceQueue(db, customer);
