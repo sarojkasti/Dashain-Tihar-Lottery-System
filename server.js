@@ -102,6 +102,15 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
     if(req.method==='GET' && url.pathname==='/api/sms-settings')return json(res,{configured:Boolean(getSmsToken())});
     if(req.method==='GET' && url.pathname==='/api/sms-test-history')return json(res,{rows:smsTestHistory(db,url.searchParams.get('start_date'),url.searchParams.get('end_date'))});
     if(req.method==='GET' && url.pathname==='/api/users')return json(res,{users:db.prepare('SELECT * FROM users ORDER BY username').all().map(publicUser)});
+    if(req.method==='GET' && url.pathname==='/api/tickets.csv') {
+      const campaign=db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaignId);
+      if(!campaign)fail('Campaign not found.',404);
+      const rows=db.prepare("SELECT t.number,c.name,c.phone,datetime(b.created,'+5 hours','+45 minutes') AS assigned FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number").all(campaignId);
+      const csvName=`tickets-${campaign.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.csv`;
+      const csv='﻿'+'Ticket Number,Customer Name,Phone,Assigned (Nepal Time)\r\n'+rows.map(r=>[r.number,`"${String(r.name||'').replace(/"/g,'""')}"`,r.phone,r.assigned].join(',')).join('\r\n');
+      audit(db,campaignId,'tickets exported',JSON.stringify({count:rows.length}));
+      res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${csvName}"`);return res.end(csv);
+    }
     if(req.method==='GET' && ['/api/audit','/api/audit.csv'].includes(url.pathname)) {
       const csv=url.pathname.endsWith('.csv'),report=auditReport(db,url.searchParams,csv);
       if(!csv)return json(res,report);
