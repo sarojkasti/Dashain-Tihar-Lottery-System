@@ -91,8 +91,8 @@ export function assign(db, campaign, expectedThreshold, expectedCount) {
         numbers.push(number);
       }
       db.prepare('UPDATE customers SET balance=balance-? WHERE id=?').run(quantity*config.threshold,c.id);
-      for (let i=0;i<numbers.length;i+=5) {
-        const message = `Your festival lottery tickets: ${numbers.slice(i,i+5).join(', ')}. Thank you for shopping with us!`;
+      for (const code of numbers) {
+        const message = `You're in! 🎉 Your Newmew Dashain Giveaway voucher code is ${code}. Keep this code safe for your chance to win a 2 nights/3 days.  Rupakot Resort stay for two, with dinner & breakfast included.`;
         db.prepare('INSERT INTO messages(id,campaign,customer,batch,message) VALUES(?,?,?,?,?)').run(randomUUID(),campaign,c.id,batch,message);
       }
     }
