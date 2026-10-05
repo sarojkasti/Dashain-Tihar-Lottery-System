@@ -6,7 +6,7 @@ import { networkInterfaces, hostname } from 'node:os';
 import { openStore, money, transaction, importGroups, assign, audit, auditContext } from './core.js';
 import { parseWorkbook, dateKey } from './importer.js';
 import { initAuth, publicUser, fail, hashPassword, verifyPassword, sessionFor, createSession, logout, requireCsrf, checkLoginLimit, saveUser } from './auth.js';
-import { auditReport } from './audit-report.js';
+import { auditReport, csvCell } from './audit-report.js';
 import { initSms, queueSms, resolveSms, queueFailedSmsRetry, createSmsWorker, smsTokenFor, saveSmsSettings, sendTestSms, refreshSmsReport, smsTestHistory, nextPendingSmsReportRange } from './sms.js';
 
 const root=fileURLToPath(new URL('.',import.meta.url));
@@ -29,6 +29,16 @@ async function autoRefreshSmsReport() {
 const previews=new Map(), port=Number(process.env.PORT || 3010);
 const host=process.env.HOST || '127.0.0.1';
 const json=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
+function customerReportRows(db, campaign) {
+  return db.prepare(`SELECT c.id,c.campaign,c.phone,c.name,c.balance,
+      COALESCE(SUM(CASE WHEN i.kind='sale' THEN i.amount ELSE 0 END),0) AS total_sales,
+      COALESCE(SUM(CASE WHEN i.kind='return' THEN -i.amount ELSE 0 END),0) AS total_returns,
+      COALESCE(SUM(i.amount),0) AS net_imported
+    FROM customers c LEFT JOIN invoices i ON i.customer=c.id
+    WHERE c.campaign=?
+    GROUP BY c.id
+    ORDER BY c.name`).all(campaign);
+}
 async function body(req) {const chunks=[];let size=0;const limit=req.url==='/api/preview'?20*1024*1024:64*1024;for await(const c of req){size+=c.length;if(size>limit)fail('Request is too large.',413);chunks.push(c);}return Buffer.concat(chunks);}
 async function readJson(req) {
   if(!/^application\/json(?:;|$)/i.test(String(req.headers['content-type']))) fail('JSON content type required',415);
@@ -103,6 +113,19 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
     if(req.method==='GET' && url.pathname==='/api/sms-test-history')return json(res,{rows:smsTestHistory(db,url.searchParams.get('start_date'),url.searchParams.get('end_date'))});
     if(req.method==='GET' && url.pathname==='/api/users')return json(res,{users:db.prepare('SELECT * FROM users ORDER BY username').all().map(publicUser)});
     const campaignId=Number(url.searchParams.get('campaign'));
+    if(req.method==='GET' && url.pathname==='/api/customers.csv') {
+      const campaign=db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaignId);
+      if(!campaign)fail('Campaign not found.',404);
+      const rows=customerReportRows(db,campaignId);
+      const csvName=`customers-${campaign.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.csv`;
+      const moneyCell=n=>(Number(n||0)/100).toFixed(2);
+      const csv='\uFEFF'+[
+        ['Customer Name','Phone','Total Sales','Sales Returns','Net Imported','Current Balance'],
+        ...rows.map(r=>[r.name,r.phone,moneyCell(r.total_sales),moneyCell(r.total_returns),moneyCell(r.net_imported),moneyCell(r.balance)])
+      ].map(row=>row.map(csvCell).join(',')).join('\r\n');
+      audit(db,campaignId,'customer report exported',JSON.stringify({count:rows.length}));
+      res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${csvName}"`);return res.end(csv);
+    }
     if(req.method==='GET' && url.pathname==='/api/tickets.csv') {
       const campaign=db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaignId);
       if(!campaign)fail('Campaign not found.',404);
@@ -129,7 +152,7 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
       if(!campaign)return json(res,{campaigns,customers:[],tickets:[],messages:[],uploads:[],exports:[],batches:[],audit:[]});
       const id=campaign.id;
       return json(res,{campaigns,campaign,smsConfigured:Boolean(getSmsToken()),
-        customers:db.prepare('SELECT * FROM customers WHERE campaign=? ORDER BY name').all(id),
+        customers:customerReportRows(db,id),
         tickets:db.prepare(`SELECT t.*,c.phone,c.name,b.created,
           COALESCE((SELECT group_concat(date || ' ' || outlet || ' ' || reference || ' Rs. ' || printf('%.2f', amount/100.0), '; ') FROM (
             SELECT i.date,i.outlet,i.reference,ts.amount FROM ticket_sources ts JOIN invoices i ON i.id=ts.invoice WHERE ts.ticket=t.number ORDER BY i.id

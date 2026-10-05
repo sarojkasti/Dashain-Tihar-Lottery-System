@@ -95,9 +95,22 @@ test('authenticated API enforces roles, CSRF, password resets, preview ownership
   assert.equal((await request('import',{id:preview.value.id,references:['WEB-1']},admin)).status,403);
   assert.equal((await request('import',{id:preview.value.id,references:['WEB-1']},operator)).status,200);
   assert.equal((await request('assign',{campaign:1,threshold:200000,count:2},operator)).value.count,2);
-  assert.equal((await request('state',undefined,viewer)).value.tickets.length,2);
+  const returns=new ExcelJS.Workbook(),returnSheet=returns.addWorksheet('Returns');returnSheet.addRow(['Date BS','Invoice No','TotalNet Amount','Phone Number']);returnSheet.addRow(['2083/6/9','SR-WEB-1',1000,'9800000000']);
+  const returnPreview=await request('preview',{campaign:1,kind:'return',filename:'return.xlsx',file:Buffer.from(await returns.xlsx.writeBuffer()).toString('base64')},operator);
+  assert.equal(returnPreview.status,200,JSON.stringify(returnPreview.value));
+  assert.equal((await request('import',{id:returnPreview.value.id,references:['SR-WEB-1']},operator)).status,200);
+  const customerState=(await request('state',undefined,viewer)).value;
+  assert.equal(customerState.tickets.length,2);
+  assert.deepEqual({
+    total_sales:customerState.customers[0].total_sales,
+    total_returns:customerState.customers[0].total_returns,
+    net_imported:customerState.customers[0].net_imported,
+    balance:customerState.customers[0].balance
+  },{total_sales:400000,total_returns:100000,net_imported:300000,balance:-100000});
+  const customerCsv=await request('customers.csv?campaign=1',undefined,viewer);
+  assert.equal(customerCsv.status,200);assert.match(customerCsv.value,/"Customer Name","Phone","Total Sales","Sales Returns","Net Imported","Current Balance"/);assert.match(customerCsv.value,/4000\.00/);assert.match(customerCsv.value,/1000\.00/);
   const report=await request('audit?actor=operator&event=import',undefined,admin);
-  assert.equal(report.value.total,1);assert.equal(report.value.rows[0].actor,'operator');assert.equal(report.value.rows[0].campaign,1);
+  assert.equal(report.value.total,2);assert.equal(report.value.rows[0].actor,'operator');assert.equal(report.value.rows[0].campaign,1);
   const csv=await request('audit.csv?actor=operator&event=import',undefined,admin);assert.equal(csv.status,200);assert.match(csv.value,/operator/);
   const user=await request('users',{username:'newuser',name:'New User',role:'viewer',active:true,password},admin);assert.equal(user.status,200);
   assert.equal((await request('users',undefined,admin)).value.users.some(u=>'password_hash' in u),false);
