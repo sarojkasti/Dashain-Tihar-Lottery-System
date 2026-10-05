@@ -49,7 +49,8 @@ async function readJson(req) {
 function validateHost(req) {
   const authority=req.headers.host || '';
   const target=new URL(`http://${authority}`);
-  const allowed=new Set(['localhost','127.0.0.1',hostname().toLowerCase(),...Object.values(networkInterfaces()).flat().filter(Boolean).map(n=>n.address.toLowerCase())]);
+  const configuredHosts=String(process.env.ALLOWED_HOSTS||'').split(',').map(h=>h.trim().toLowerCase()).filter(Boolean);
+  const allowed=new Set(['localhost','127.0.0.1',hostname().toLowerCase(),...configuredHosts,...Object.values(networkInterfaces()).flat().filter(Boolean).map(n=>n.address.toLowerCase())]);
   if(!allowed.has(target.hostname.toLowerCase()) || target.username || target.password || target.host!==authority.toLowerCase())fail('Invalid host',403);
   if(req.headers.origin && req.headers.origin!==`http://${authority}`)fail('Invalid origin',403);
   if(req.headers['sec-fetch-site']==='cross-site')fail('Cross-site requests are not allowed.',403);
