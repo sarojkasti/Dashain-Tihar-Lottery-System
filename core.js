@@ -140,10 +140,8 @@ export function assign(db, campaign, expectedThreshold, expectedCount) {
         numbers.push(number);
       }
       db.prepare('UPDATE customers SET balance=balance-? WHERE id=?').run(quantity*config.threshold,c.id);
-      for (let i=0;i<numbers.length;i+=5) {
-        const chunk=numbers.slice(i,i+5);
-        const codeList=chunk.length===1?`is ${chunk[0]}`:`are: ${chunk.join(', ')}`;
-        const message=`You're in! 🎉 Your Newmew Dashain Giveaway voucher code${chunk.length>1?'s':''} ${codeList}. Keep this code safe for your chance to win a 2 nights/3 days.  Rupakot Resort stay for two, with dinner & breakfast included.`;
+      for (const number of numbers) {
+        const message=`You are in! Your Newmew Dashain Giveaway voucher code is ${number}. Keep this code safe for your chance to win a 2 Nights / 3 Days stay at Rupakot Resort for two, including dinner & breakfast. While you are here, explore more of our latest designs and exclusive offers at the Newmew website. www.newmew.com Good luck!`;
         db.prepare('INSERT INTO messages(id,campaign,customer,batch,message) VALUES(?,?,?,?,?)').run(randomUUID(),campaign,c.id,batch,message);
       }
     }
