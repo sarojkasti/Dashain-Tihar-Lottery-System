@@ -49,7 +49,7 @@ export async function parseWorkbook(buffer, campaign, kind, db) {
   }
   if(!sheet) throw Error('Could not find Invoice No, Date BS and TotalNet Amount headers');
   if(sheet.rowCount>50000) throw Error('Maximum 50,000 rows per upload');
-  const phoneColumn = columns.phonenumber || columns.phoneno || columns.phone || columns.mobile || columns.mobileno || columns.mobilenumber || columns.nepalnumber;
+  const phoneColumn = columns.phonenumber || columns.phoneno || columns.phone || columns.mobile || columns.mobileno || columns.mobilenumber || columns.nepalnumber || columns.contactno || columns.contact;
   const groups=new Map(); let ignored=0;
   for(let r=header+1;r<=sheet.rowCount;r++) {
     const row=sheet.getRow(r), get=k=>columns[k]?cellText(row.getCell(columns[k])):'';
