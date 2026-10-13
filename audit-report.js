@@ -25,10 +25,10 @@ export function auditReport(db, params, csv = false) {
   const page = Number(params.get('page') || 1), pageSize = 50;
   if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) fail('Invalid report page.');
   if (csv && total > 100000) fail('Narrow the filters to export at most 100,000 audit records.');
-  const rows = db.prepare(`SELECT a.*,c.name campaign_name FROM audit a LEFT JOIN campaigns c ON c.id=a.campaign${clause}
+  const rows = db.prepare(`SELECT a.id,a.campaign,a.event,a.detail,datetime(a.created,'+5 hours','+45 minutes') AS created,a.actor,a.ip,a.outcome,c.name campaign_name FROM audit a LEFT JOIN campaigns c ON c.id=a.campaign${clause}
     ORDER BY a.id DESC LIMIT ? OFFSET ?`).all(...values, csv ? 100000 : pageSize, csv ? 0 : (page - 1) * pageSize);
   if (csv) return '\uFEFF' + [
-    ['ID','Time (UTC)','Username','Source IP','Campaign','Action','Outcome','Details'],
+    ['ID','Time (Nepal Time)','Username','Source IP','Campaign','Action','Outcome','Details'],
     ...rows.map(a => [a.id,a.created,a.actor || 'Legacy / system',a.ip || '',a.campaign_name || '',a.event,a.outcome,a.detail])
   ].map(row => row.map(csvCell).join(',')).join('\r\n');
   return { rows, total, page, pageSize,
