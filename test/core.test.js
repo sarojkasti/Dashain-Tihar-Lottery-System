@@ -10,6 +10,10 @@ function ingest(db,reference,amount,kind='sale',date='2083/06/01'){return import
 test('carry balances, ignore repeated imports, retain tickets after returns and recover negative balances',()=>{
  const db=setup();ingest(db,'PKR-1',450000);assert.equal(ingest(db,'PKR-1',450000).count,0);
  assert.equal(assign(db,1,200000,2).count,2);assert.equal(db.prepare('SELECT balance FROM customers').get().balance,50000);
+ const firstMessage=db.prepare('SELECT message FROM messages').get().message;
+ assert.equal(db.prepare('SELECT count(*) n FROM messages').get().n,1);
+ assert.equal((firstMessage.match(/DT-\d{10}/g)||[]).length,2);
+ assert.match(firstMessage,/voucher codes are/);
  ingest(db,'SR-PKR-1',150000,'return');assert.equal(db.prepare('SELECT balance FROM customers').get().balance,-100000);
  assert.equal(db.prepare('SELECT count(*) n FROM tickets').get().n,2);
  assert.equal(ingest(db,'SR-PKR-1',150000,'return').count,0);

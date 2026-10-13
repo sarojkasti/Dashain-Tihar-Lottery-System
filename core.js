@@ -140,10 +140,9 @@ export function assign(db, campaign, expectedThreshold, expectedCount) {
         numbers.push(number);
       }
       db.prepare('UPDATE customers SET balance=balance-? WHERE id=?').run(quantity*config.threshold,c.id);
-      for (const number of numbers) {
-        const message=`You are in! Your Newmew Dashain Giveaway voucher code is ${number}. Keep this code safe for your chance to win a 2 Nights / 3 Days stay at Rupakot Resort for two, including dinner & breakfast. While you are here, explore more of our latest designs and exclusive offers at the Newmew website. www.newmew.com Good luck!`;
-        db.prepare('INSERT INTO messages(id,campaign,customer,batch,message) VALUES(?,?,?,?,?)').run(randomUUID(),campaign,c.id,batch,message);
-      }
+      const codeLabel=numbers.length===1?'voucher code is':'voucher codes are';
+      const message=`You are in! Your Newmew Dashain Giveaway ${codeLabel} ${numbers.join(', ')}. Keep ${numbers.length===1?'this code':'these codes'} safe for your chance to win a 2 Nights / 3 Days stay at Rupakot Resort for two, including dinner & breakfast. While you are here, explore more of our latest designs and exclusive offers at the Newmew website. www.newmew.com Good luck!`;
+      db.prepare('INSERT INTO messages(id,campaign,customer,batch,message) VALUES(?,?,?,?,?)').run(randomUUID(),campaign,c.id,batch,message);
     }
     audit(db,campaign,'tickets assigned',JSON.stringify({batch,count,threshold:config.threshold}));
     return {batch,count};
