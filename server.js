@@ -159,7 +159,7 @@ const server=http.createServer((req,res)=>auditContext.run({ip:req.socket.remote
             SELECT i.date,i.outlet,i.reference,ts.amount FROM ticket_sources ts JOIN invoices i ON i.id=ts.invoice WHERE ts.ticket=t.number ORDER BY i.id
           )),'') AS purchases
           FROM tickets t JOIN customers c ON c.id=t.customer JOIN batches b ON b.id=t.batch WHERE t.campaign=? ORDER BY b.created DESC,t.number`).all(id),
-        messages:db.prepare("SELECT m.*,c.phone,c.name,a.provider_id,a.detail AS api_detail,COALESCE(datetime(a.updated,'+5 hours','+45 minutes'),datetime(e.created,'+5 hours','+45 minutes')) AS sent_at FROM messages m JOIN customers c ON c.id=m.customer LEFT JOIN sms_attempts a ON a.message=m.id LEFT JOIN exports e ON e.id=m.export_id WHERE m.campaign=? ORDER BY m.rowid DESC").all(id),
+        messages:db.prepare("SELECT m.*,c.phone,c.name,a.provider_id,a.detail AS api_detail,COALESCE(datetime(a.updated,'+5 hours','+45 minutes'),datetime(e.created,'+5 hours','+45 minutes'),datetime(b.created,'+5 hours','+45 minutes')) AS sent_at FROM messages m JOIN customers c ON c.id=m.customer LEFT JOIN sms_attempts a ON a.message=m.id LEFT JOIN exports e ON e.id=m.export_id LEFT JOIN batches b ON b.id=m.batch WHERE m.campaign=? ORDER BY m.rowid DESC").all(id),
         uploads:db.prepare('SELECT * FROM uploads WHERE campaign=? ORDER BY created DESC').all(id),
         batches:db.prepare('SELECT * FROM batches WHERE campaign=? ORDER BY created DESC').all(id),
         exports:db.prepare('SELECT e.*,COUNT(m.id) AS count FROM exports e LEFT JOIN messages m ON m.export_id=e.id WHERE e.campaign=? GROUP BY e.id ORDER BY e.created DESC').all(id),
